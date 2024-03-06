@@ -5,11 +5,11 @@
 
 int main(int argc, char **argv) {
 	if (argc != 2) {
-		std::cerr << std::endl << "usage: " << argv[0] << " <camera_id>" << std::endl;
+		std::cerr << "usage: " << argv[0] << " <camera_id>" << std::endl;
 		return 1;
 	}
 
-	int8_t camera_id = std::atoi(argv[1]);
+	unsigned char camera_id = std::atoi(argv[1]);
 	cv::VideoCapture capture(camera_id);
 
 	if (!capture.isOpened()) {
@@ -18,29 +18,22 @@ int main(int argc, char **argv) {
 	}
 
 	cv::namedWindow("frame", cv::WINDOW_AUTOSIZE);
-	cv::createTrackbar("brightness", "frame", NULL, 255);
 
 	cv::Mat frame;
-	short last_brightness = 0;
-	short brightness = 1;
-
 	v4l2::VideoControl video_control("config.yaml", camera_id);
+
 	char key;
 	char escape = 27;
 	char save = 's';
 
-	while (key != 27) {
+	while (key != escape) {
 		key = cv::waitKey(1);
-		capture.read(frame);
-		brightness = cv::getTrackbarPos("brightness", "frame");
-		video_control.GetTrackbarValue();
-
-		cv::imshow("frame", frame);
-		last_brightness = brightness;
-
-		if (key == save) {
+		if (key == save)
 			video_control.WriteConfigToYAMLFile();
-		}
+
+		video_control.GetTrackbarValue();
+		capture.read(frame);
+		cv::imshow("frame", frame);
 	}
 
 	cv::destroyAllWindows();

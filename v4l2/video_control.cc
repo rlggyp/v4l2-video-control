@@ -1,35 +1,36 @@
 #include 	"video_control.h"
 
 #include <fcntl.h>
-#include <fstream>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <linux/videodev2.h>
 #include <yaml-cpp/yaml.h>
+#include <opencv2/opencv.hpp>
 
 #include <cctype>
-#include <opencv2/opencv.hpp>
+#include <fstream>
 
 std::string LowerCase(const unsigned char *word, const size_t &word_length);
 
 namespace v4l2 {
-VideoControl::VideoControl(const std::string &config_path, unsigned char camera_id) {
-	window_name_ = "VidioControls";
-	cv::namedWindow(window_name_, cv::WINDOW_AUTOSIZE);
-	camera_id_ = camera_id;
+VideoControl::VideoControl(const std::string &config_path, const unsigned char camera_id) {
+	device_ = "/dev/video" + std::to_string(camera_id);
 	config_path_ = config_path;
+	window_name_ = "VideoControl";
+
 	GetAvailableControls();
-	LoadConfigYAML();
+	std::vector<Config> yaml_config = GetConfigFromYAMLFile();
+	MergeConfigAndSetAllControls(yaml_config);
+
+	cv::namedWindow(window_name_, cv::WINDOW_AUTOSIZE);
 	CreateTrackbar();
-	SetControls();
 }
 
 void VideoControl::GetAvailableControls() {
-	std::string device = "/dev/video" + std::to_string(camera_id_);
-	int fd = open(device.c_str(), O_RDWR);
+	int fd = open(device_.c_str(), O_RDWR);
 
 	if (fd == -1) {
-		std::cerr << "Failed to open " << device << std::endl;
+		std::cerr << "Failed to open " << device_ << std::endl;
 		return;
 	}
 
@@ -64,18 +65,18 @@ void VideoControl::GetAvailableControls() {
 	close(fd);
 }
 
-void VideoControl::LoadConfigYAML() {
+std::vector<Config> VideoControl::GetConfigFromYAMLFile() {
+	std::vector<Config> yaml_config;
   std::ifstream checkfile(config_path_);
 
   if (!checkfile.is_open()) {
     std::cerr << "Unable to open file: " << config_path_ << std::endl;
-    return;
+    return yaml_config;
   }
 
 	checkfile.close();
 
 	YAML::Node config = YAML::LoadFile(config_path_);
-	std::vector<Config> yaml_config;
 
  	for (YAML::const_iterator it = config.begin(); it != config.end(); ++it) {
 		Config temp;
@@ -85,54 +86,67 @@ void VideoControl::LoadConfigYAML() {
 		yaml_config.push_back(temp);
  	}
 
-	for (const Config &yaml_item : yaml_config) {
-		bool replaced = false;
-		for (Config &config_item : config_) {
-			if (config_item.name == yaml_item.name) {
-				config_item.value = yaml_item.value;
-				replaced = true;
-				break;
-			}
-		}
-
-		if (!replaced) {
-			config_.push_back(yaml_item);
-		}
-	}
+	return yaml_config;
 }
 
-void VideoControl::SetControls() {
-	std::string device = "/dev/video" + std::to_string(camera_id_);
-	int fd = open(device.c_str(), O_RDWR);
+void VideoControl::MergeConfigAndSetAllControls(const std::vector<Config> &yaml_config) {
+	for (const Config &yaml_item : yaml_config) {
+		bool replaced = false;
+
+		for (Config &config_item : config_) {
+			if (config_item.name != yaml_item.name)
+				continue;
+
+			config_item.value = yaml_item.value;
+			replaced = true;
+			break;
+		}
+
+		if (!replaced)
+			config_.push_back(yaml_item);
+	}
+
+	int fd = open(device_.c_str(), O_RDWR);
 
 	if (fd == -1) {
-		std::cerr << "Failed to open " << device << std::endl;
+		std::cerr << "Failed to open " << device_ << std::endl;
 		return;
 	}
 
-	for (const Config &config_item : config_) {
-		if (config_item.available || (config_item.previous_value == config_item.value))
+	for (Config &config_item : config_) {
+		if (!config_item.available)
 			continue;
 
-		v4l2_control control{};
-		control.id = config_item.control_id;
-		control.value = config_item.value;
+		SetControl(fd, config_item);
+		config_item.previous_value = config_item.value;
+	}
+
+	close(fd);
+}
+
+void VideoControl::SetControl(const int &fd, const Config &config) {
+	v4l2_control control{};
+	control.id = config.control_id;
+	control.value = config.value;
+
+	if (ioctl(fd, VIDIOC_S_CTRL, &control) < 0) {
+		std::cerr << "Failed to set control " << config.name << ": " << config.value << std::endl;
+	}
+}
+
+void VideoControl::SetAllControls() {
+	int fd = open(device_.c_str(), O_RDWR);
+
+	if (fd == -1) {
+		std::cerr << "Failed to open " << device_ << std::endl;
+		return;
 	}
 
 	for (Config &config_item : config_) {
 		if (!config_item.available || (config_item.previous_value == config_item.value))
 			continue;
 
-		v4l2_control control{};
-		control.id = config_item.control_id;
-		control.value = config_item.value;
-
-		if (ioctl(fd, VIDIOC_S_CTRL, &control) < 0) {
-			std::cerr << "Failed to set control " << config_item.name << ": " << config_item.value << std::endl;
-		} else {
-			std::cout << "Success to set control " << config_item.name << ": " << config_item.value << std::endl;
-		}
-
+		SetControl(fd, config_item);
 		config_item.previous_value = config_item.value;
 	}
 
@@ -170,7 +184,7 @@ void VideoControl::GetTrackbarValue() {
 			config.value -= abs(config.min_value);
 	}
 
-	SetControls();
+	SetAllControls();
 }
 void VideoControl::WriteConfigToYAMLFile() {
  std::ofstream file(config_path_);
@@ -187,6 +201,7 @@ void VideoControl::WriteConfigToYAMLFile() {
 
   file << emitter.c_str();
   file.close();
+	std::cout << "Config saved successfully to: " << config_path_ << std::endl;
 }
 
 } // namespace v4l2

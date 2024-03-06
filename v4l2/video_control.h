@@ -20,7 +20,7 @@ struct Config {
 			min_value(0),
 			max_value(0),
 			value(0),
-			previous_value(-1),
+			previous_value(0),
 			available(false) {}
 };
 
@@ -33,15 +33,16 @@ class VideoControl {
 
  private:
 	void GetAvailableControls();
-	void LoadConfigYAML();
-	void SetControls();
+	std::vector<Config> GetConfigFromYAMLFile();
+	void MergeConfigAndSetAllControls(const std::vector<Config> &yaml_config);
+	void SetControl(const int &fd, const Config &config);
+	void SetAllControls();
 	void CreateTrackbar();
 
 	std::string config_path_;
+	std::string device_;
 	std::string window_name_;
 	std::vector<Config> config_;
-
-	unsigned char camera_id_;
 };
 } // namespace v4l2
 

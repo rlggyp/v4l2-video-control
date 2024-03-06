@@ -1,5 +1,7 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.12.0)
 project(main)
+
+set(CMAKE_CXX_STANDARD 14)
 
 find_package(OpenCV REQUIRED)
 
@@ -10,4 +12,7 @@ add_executable(${PROJECT_NAME}
   video_control.cc
 )
 
-target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBS} yaml-cpp)
+target_link_libraries(${PROJECT_NAME}
+	${OpenCV_LIBS}
+	yaml-cpp
+)
